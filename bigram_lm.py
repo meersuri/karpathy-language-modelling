@@ -39,7 +39,7 @@ class BigramLM(BaseLM):
         super().__init__(dataset, hparams)
         vocab_size = len(dataset.vocab)
         self.token_lut = torch.nn.Embedding(vocab_size, vocab_size)
-        self.attn = SelfAttention(vocab_size, 20, 30)
+        self.attn = MultiHeadAttention(2, vocab_size, 20, 30)
 
     def forward(self, x, targets=None):
         logits = self.attn(self.token_lut(x))
@@ -69,15 +69,18 @@ class BigramLM2(BaseLM):
 
         return logits, loss
 
+
 class SelfAttention(torch.nn.Module):
-    def __init__(self, input_dim, key_dim, value_dim, masked=True):
+    def __init__(self, input_dim, key_dim, value_dim, masked=True, output_dim=None):
         super().__init__()
+        if output_dim is None:
+            output_dim = input_dim
         self.masked = masked
         self.key_dim = key_dim
         self.query_proj = torch.nn.Linear(input_dim, key_dim)
         self.key_proj = torch.nn.Linear(input_dim, key_dim)
         self.value_proj = torch.nn.Linear(input_dim, value_dim)
-        self.out_proj = torch.nn.Linear(value_dim, input_dim)
+        self.out_proj = torch.nn.Linear(value_dim, output_dim)
 
     def forward(self, x):
         q = self.query_proj(x)
@@ -93,6 +96,21 @@ class SelfAttention(torch.nn.Module):
         return y
 
 
+class MultiHeadAttention(torch.nn.Module):
+    def __init__(self, head_count, input_dim, key_dim, value_dim, masked=True):
+        super().__init__()
+        head_size = input_dim//head_count
+        self.sa = torch.nn.ModuleList([
+            SelfAttention(input_dim, key_dim, value_dim, output_dim=head_size) for i in range(head_count - 1)
+        ])
+        head_size += (input_dim - head_count*head_size)
+        self.sa.append(SelfAttention(input_dim, key_dim, value_dim, output_dim=head_size))
+
+    def forward(self, x):
+        sa_outs = [sa(x) for sa in self.sa]
+        out = torch.cat([x for x in sa_outs], dim=-1)
+        return out
+
 
 if __name__ == '__main__':
     data_path = 'shakespeare.txt'
@@ -103,7 +121,6 @@ if __name__ == '__main__':
     x, y = ds.get_batch(ds.train, 8, 1)
     x, y = x.to(lm.device), y.to(lm.device)
     logits, loss = lm.forward(x, y)
-    breakpoint()
     print(loss)
     inp = torch.tensor([[0]]).to(lm.device)
     print(ds.decode(lm.generate(inp)[0].tolist()))
