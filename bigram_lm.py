@@ -61,13 +61,14 @@ class BigramLM(BaseLM):
         self.token_lut = torch.nn.Embedding(vocab_size, embed_dim)
         self.pos_lut = torch.nn.Embedding(block_size, embed_dim)
         self.attn = MultiHeadAttention(attn_heads, embed_dim, key_dim, value_dim)
+        self.ffwd = FeedForward(embed_dim)
         self.out_proj = torch.nn.Linear(embed_dim, vocab_size)
 
     def forward(self, x, targets=None):
         token = self.token_lut(x)
         pos = self.pos_lut(torch.arange(x.shape[1], device=self.device))
         x = token + pos
-        logits = self.out_proj(self.attn(x))
+        logits = self.out_proj(self.ffwd(self.attn(x)))
         if targets is None:
             loss = None
         else:
@@ -137,6 +138,14 @@ class MultiHeadAttention(torch.nn.Module):
         out = torch.cat([x for x in sa_outs], dim=-1)
         return out
 
+class FeedForward(torch.nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.proj = torch.nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        return F.relu(self.proj(x))
+
 
 if __name__ == '__main__':
     data_path = 'shakespeare.txt'
@@ -145,7 +154,7 @@ if __name__ == '__main__':
     block_size = 8 # number of tokens in the sequence
     embed_dim = 70 # token idx -> vector of embed_dim
     batch_size = 32
-    attn_heads = 4
+    attn_heads = 8
     key_dim, value_dim = 8, 8
     lm = BigramLM(ds, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams)
     lm.to(lm.device)
