@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -155,7 +157,15 @@ if __name__ == '__main__':
     inp = torch.tensor([[0]]).to(lm.device)
     print(ds.decode(lm.generate(inp, block_size)[0].tolist()))
     opt = torch.optim.AdamW(lm.parameters(), lr=hparams.lr)
-    lm.train(opt, steps=5000)
+    steps = 1000
+    lm.train(opt, steps=steps)
     print(ds.decode(lm.generate(inp, block_size, max_tokens=1000)[0].tolist()))
     loss = lm.calc_loss(ds, block_size, batch_size, 'val')
     print(f'val loss: {loss}')
+    time_str = datetime.strftime(datetime.now(), '%Y%d%m%H%M%S')
+    torch.save( {
+        'steps': steps,
+        'model_state_dict': lm.state_dict(),
+        'optimizer_state_dict': opt.state_dict(),
+        'val_loss': loss,
+    }, f'model_{time_str}.ckpt')
