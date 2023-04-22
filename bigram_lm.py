@@ -54,6 +54,23 @@ class BigramLM(BaseLM):
 
         return logits, loss
 
+    def calc_loss(self, ds, block_size, batch_size, split='train'):
+        with torch.no_grad():
+            if split == 'train':
+                data = ds.train
+            else:
+                data = ds.val
+            n = 100
+            loss = 0
+            for i in range(n):
+                x, y = ds.get_batch(data, block_size, batch_size)
+                x, y = x.to(self.device), y.to(self.device)
+                _, batch_loss = self(x, targets=y)
+                loss += batch_loss
+            loss /= n
+            return loss
+
+
 
 class BigramLM2(BaseLM):
     def __init__(self, dataset, hparams):
