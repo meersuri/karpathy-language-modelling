@@ -15,13 +15,16 @@ class BaseLM(torch.nn.Module):
         self.ds = dataset
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    def generate(self, batch, max_tokens=100):
+    def generate(self, batch, block_size, max_tokens=100):
+        out = torch.clone(batch)
         for i in range(max_tokens):
+            batch = batch[:, -block_size:]
             logits, loss = self(batch)
             probs = torch.softmax(logits[:, -1, :], dim=1)
             samples = torch.multinomial(probs, num_samples=1)
             batch = torch.cat([batch, samples], dim=1)
-        return batch
+            out = torch.cat([out, samples], dim=1)
+        return out
 
     def train(self, opt, steps=1000, block_size=8, batch_size=32):
         for i in tqdm(range(steps)):
