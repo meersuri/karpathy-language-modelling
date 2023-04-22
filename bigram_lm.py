@@ -156,7 +156,7 @@ class TransformerBlock(torch.nn.Module):
         self.ln2 = torch.nn.LayerNorm(embed_dim)
 
     def forward(self, x):
-        return self.ffwd(self.ln2(self.attn(self.ln1(x))))
+        return x + self.ffwd(self.ln2(self.attn(self.ln1(x))))
 
 
 if __name__ == '__main__':
