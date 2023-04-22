@@ -152,9 +152,11 @@ class TransformerBlock(torch.nn.Module):
         super().__init__()
         self.attn = MultiHeadAttention(head_count, embed_dim, key_dim, value_dim, masked)
         self.ffwd = FeedForward(embed_dim)
+        self.ln1 = torch.nn.LayerNorm(embed_dim)
+        self.ln2 = torch.nn.LayerNorm(embed_dim)
 
     def forward(self, x):
-        return self.ffwd(self.attn(x))
+        return self.ffwd(self.ln2(self.attn(self.ln1(x))))
 
 
 if __name__ == '__main__':
