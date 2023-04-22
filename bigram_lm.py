@@ -34,18 +34,22 @@ class BaseLM(torch.nn.Module):
             logits, loss = self.forward(x, y)
             loss.backward()
             opt.step()
-        print(loss)
 
 
 class BigramLM(BaseLM):
-    def __init__(self, dataset, hparams):
+    def __init__(self, dataset, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams):
         super().__init__(dataset, hparams)
         vocab_size = len(dataset.vocab)
-        self.token_lut = torch.nn.Embedding(vocab_size, vocab_size)
-        self.attn = MultiHeadAttention(2, vocab_size, 20, 30)
+        self.token_lut = torch.nn.Embedding(vocab_size, embed_dim)
+        self.pos_lut = torch.nn.Embedding(block_size, embed_dim)
+        self.attn = MultiHeadAttention(attn_heads, embed_dim, key_dim, value_dim)
+        self.out_proj = torch.nn.Linear(embed_dim, vocab_size)
 
     def forward(self, x, targets=None):
-        logits = self.attn(self.token_lut(x))
+        token = self.token_lut(x)
+        pos = self.pos_lut(torch.arange(x.shape[1], device=self.device))
+        x = token + pos
+        logits = self.out_proj(self.attn(x))
         if targets is None:
             loss = None
         else:
@@ -136,14 +140,22 @@ if __name__ == '__main__':
     data_path = 'shakespeare.txt'
     ds = Dataset(data_path)
     hparams = HyperParams(lr=1e-3)
-    lm = BigramLM(ds, hparams)
+    block_size = 8 # number of tokens in the sequence
+    embed_dim = 70 # token idx -> vector of embed_dim
+    batch_size = 32
+    attn_heads = 4
+    key_dim, value_dim = 8, 8
+    lm = BigramLM(ds, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams)
     lm.to(lm.device)
-    x, y = ds.get_batch(ds.train, 8, 1)
+    x, y = ds.get_batch(ds.train, block_size, batch_size)
     x, y = x.to(lm.device), y.to(lm.device)
-    logits, loss = lm.forward(x, y)
-    print(loss)
+    logits, _ = lm.forward(x, y)
+    loss = lm.calc_loss(ds, block_size, batch_size, 'val')
+    print(f'init val loss: {loss}')
     inp = torch.tensor([[0]]).to(lm.device)
-    print(ds.decode(lm.generate(inp)[0].tolist()))
+    print(ds.decode(lm.generate(inp, block_size)[0].tolist()))
     opt = torch.optim.AdamW(lm.parameters(), lr=hparams.lr)
-    lm.train(opt, steps=10000)
-    print(ds.decode(lm.generate(inp, max_tokens=500)[0].tolist()))
+    lm.train(opt, steps=5000)
+    print(ds.decode(lm.generate(inp, block_size, max_tokens=1000)[0].tolist()))
+    loss = lm.calc_loss(ds, block_size, batch_size, 'val')
+    print(f'val loss: {loss}')
