@@ -55,20 +55,21 @@ class BaseLM(torch.nn.Module):
 
 
 class BigramLM(BaseLM):
-    def __init__(self, dataset, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams):
+    def __init__(self, dataset, layers, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams):
         super().__init__(dataset, hparams)
         vocab_size = len(dataset.vocab)
         self.token_lut = torch.nn.Embedding(vocab_size, embed_dim)
         self.pos_lut = torch.nn.Embedding(block_size, embed_dim)
-        self.attn = MultiHeadAttention(attn_heads, embed_dim, key_dim, value_dim)
-        self.ffwd = FeedForward(embed_dim)
+        self.blocks = torch.nn.ModuleList([TransformerBlock(attn_heads, embed_dim, key_dim, value_dim)]*layers)
         self.out_proj = torch.nn.Linear(embed_dim, vocab_size)
 
     def forward(self, x, targets=None):
         token = self.token_lut(x)
         pos = self.pos_lut(torch.arange(x.shape[1], device=self.device))
         x = token + pos
-        logits = self.out_proj(self.ffwd(self.attn(x)))
+        for b in self.blocks:
+            x = b(x)
+        logits = self.out_proj(x)
         if targets is None:
             loss = None
         else:
@@ -146,6 +147,15 @@ class FeedForward(torch.nn.Module):
     def forward(self, x):
         return F.relu(self.proj(x))
 
+class TransformerBlock(torch.nn.Module):
+    def __init__(self, head_count, embed_dim, key_dim, value_dim, masked=True):
+        super().__init__()
+        self.attn = MultiHeadAttention(head_count, embed_dim, key_dim, value_dim, masked)
+        self.ffwd = FeedForward(embed_dim)
+
+    def forward(self, x):
+        return self.ffwd(self.attn(x))
+
 
 if __name__ == '__main__':
     data_path = 'shakespeare.txt'
@@ -155,8 +165,9 @@ if __name__ == '__main__':
     embed_dim = 70 # token idx -> vector of embed_dim
     batch_size = 32
     attn_heads = 8
+    layers = 2
     key_dim, value_dim = 8, 8
-    lm = BigramLM(ds, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams)
+    lm = BigramLM(ds, layers, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams)
     lm.to(lm.device)
     x, y = ds.get_batch(ds.train, block_size, batch_size)
     x, y = x.to(lm.device), y.to(lm.device)
@@ -166,7 +177,7 @@ if __name__ == '__main__':
     inp = torch.tensor([[0]]).to(lm.device)
     print(ds.decode(lm.generate(inp, block_size)[0].tolist()))
     opt = torch.optim.AdamW(lm.parameters(), lr=hparams.lr)
-    steps = 1000
+    steps = 5000
     lm.train(opt, steps=steps)
     print(ds.decode(lm.generate(inp, block_size, max_tokens=1000)[0].tolist()))
     loss = lm.calc_loss(ds, block_size, batch_size, 'val')
