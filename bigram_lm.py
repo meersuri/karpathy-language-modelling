@@ -27,12 +27,25 @@ class BaseLM(torch.nn.Module):
         return out
 
     def train_loop(self, ds, opt, steps=1000, block_size=8, batch_size=32):
+        time_str = datetime.strftime(datetime.now(), '%Y%d%m%H%M%S')
         eval_period = steps//50
+        best_loss = torch.inf
         for i in tqdm(range(steps)):
             if i % eval_period == 0:
                 train_loss = self.calc_loss(ds, block_size, batch_size, 'train')
                 val_loss = self.calc_loss(ds, block_size, batch_size, 'val')
                 print(f'Iter {i} train loss: {train_loss:.3f} val loss: {val_loss:.3f}')
+                if val_loss < best_loss:
+                    best_loss = val_loss
+                    torch.save( {
+                        'steps': i,
+                        'model_state_dict': self.state_dict(),
+                        'optimizer_state_dict': opt.state_dict(),
+                        'train_loss': train_loss,
+                        'val_loss': val_loss,
+                    }, f'model_{time_str}.ckpt')
+                elif val_loss > best_loss*1.25: # heavy overfitting
+                    return
             x, y = ds.get_batch(ds.train, block_size, batch_size)
             x, y = x.to(self.device), y.to(self.device)
             opt.zero_grad()
@@ -191,11 +204,4 @@ if __name__ == '__main__':
     lm.train_loop(ds, opt, steps=steps, block_size=block_size, batch_size=batch_size)
     print(ds.decode(lm.generate(inp, block_size, max_tokens=1000)[0].tolist()))
     loss = lm.calc_loss(ds, block_size, batch_size, 'val')
-    print(f'val loss: {loss:.3f}')
-    time_str = datetime.strftime(datetime.now(), '%Y%d%m%H%M%S')
-    torch.save( {
-        'steps': steps,
-        'model_state_dict': lm.state_dict(),
-        'optimizer_state_dict': opt.state_dict(),
-        'val_loss': loss,
-    }, f'model_{time_str}.ckpt')
+    print(f'\nval loss: {loss:.3f}')
