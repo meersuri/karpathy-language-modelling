@@ -114,7 +114,7 @@ class SelfAttention(torch.nn.Module):
         self.key_proj = torch.nn.Linear(input_dim, key_dim)
         self.value_proj = torch.nn.Linear(input_dim, value_dim)
         self.out_proj = torch.nn.Linear(value_dim, output_dim)
-        self.dropout = torch.nn.Dropout(0.2)
+        self.dropout = torch.nn.Dropout()
 
     def forward(self, x):
         q = self.query_proj(x)
@@ -140,7 +140,7 @@ class MultiHeadAttention(torch.nn.Module):
         ])
         head_size += (input_dim - head_count*head_size)
         self.sa.append(SelfAttention(input_dim, key_dim, value_dim, output_dim=head_size))
-        self.dropout = torch.nn.Dropout(0.2)
+        self.dropout = torch.nn.Dropout()
 
     def forward(self, x):
         sa_outs = [sa(x) for sa in self.sa]
@@ -152,7 +152,7 @@ class FeedForward(torch.nn.Module):
         super().__init__()
         self.proj1 = torch.nn.Linear(embed_dim, 4*embed_dim)
         self.proj2 = torch.nn.Linear(4*embed_dim, embed_dim)
-        self.dropout = torch.nn.Dropout(0.2)
+        self.dropout = torch.nn.Dropout()
 
     def forward(self, x):
         x = F.relu(self.proj1(x))
