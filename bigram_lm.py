@@ -7,12 +7,8 @@ import torch.nn.functional as F
 
 from dataset import Dataset
 
-class HyperParams:
-    def __init__(self, lr=1e-3):
-        self.lr = lr
-
 class BaseLM(torch.nn.Module):
-    def __init__(self, hparams):
+    def __init__(self, **kwargs):
         super().__init__()
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -61,8 +57,17 @@ class BaseLM(torch.nn.Module):
 
 
 class BigramLM(BaseLM):
-    def __init__(self, vocab_size, layers, block_size, embed_dim, attn_heads, hparams):
-        super().__init__(hparams)
+    def __init__(
+            self,
+            vocab_size=65,
+            layers=6,
+            block_size=256,
+            embed_dim=384,
+            attn_heads=6,
+            learning_rate=3e-4,
+            **kwargs
+            ):
+        super().__init__(**kwargs)
         self.token_lut = torch.nn.Embedding(vocab_size, embed_dim)
         self.pos_lut = torch.nn.Embedding(block_size, embed_dim)
         self.blocks = torch.nn.ModuleList([TransformerBlock(attn_heads, embed_dim)]*layers)
@@ -76,24 +81,6 @@ class BigramLM(BaseLM):
         for b in self.blocks:
             x = b(x)
         logits = self.out_proj(self.norm(x))
-        if targets is None:
-            loss = None
-        else:
-            B, T, C = logits.shape
-            loss = F.cross_entropy(logits.view(B*T, C), targets.view(B*T))
-
-        return logits, loss
-
-
-
-class BigramLM2(BaseLM):
-    def __init__(self, vocab_size, hparams):
-        super().__init__(hparams)
-        self.linear1 = torch.nn.Linear(1, vocab_size)
-
-    def forward(self, x, targets=None):
-        x = torch.unsqueeze(x, -1).float()
-        logits = self.linear1(x)
         if targets is None:
             loss = None
         else:
@@ -176,14 +163,21 @@ class TransformerBlock(torch.nn.Module):
 if __name__ == '__main__':
     data_path = 'shakespeare.txt'
     ds = Dataset(data_path)
-    hparams = HyperParams(lr=1e-3)
-    block_size = 256 # number of tokens in the sequence
-    embed_dim = 128 # token idx -> vector of embed_dim
-    batch_size = 64
-    attn_heads = 6
-    layers = 6
-    lm = BigramLM(len(ds.vocab), layers, block_size, embed_dim, attn_heads, hparams)
+
+    kwargs = dict(
+        vocab_size = len(ds.vocab),
+        block_size = 256, # number of tokens in the sequence
+        embed_dim = 384, # token idx -> vector of embed_dim
+        attn_heads = 6,
+        layers = 6
+        )
+    batch_size = 48
+    learning_rate = 5e-4
+
+    lm = BigramLM(**kwargs)
     lm.to(lm.device)
+
+    block_size = kwargs['block_size']
     x, y = ds.get_batch(ds.train, block_size, batch_size)
     x, y = x.to(lm.device), y.to(lm.device)
     logits, _ = lm.forward(x, y)
@@ -192,8 +186,8 @@ if __name__ == '__main__':
     inp = torch.tensor([[0]]).to(lm.device)
     print(ds.decode(lm.generate(inp, block_size)[0].tolist()))
 
-    opt = torch.optim.AdamW(lm.parameters(), lr=hparams.lr)
-    steps = 1000
+    opt = torch.optim.AdamW(lm.parameters(), lr=learning_rate)
+    steps = 5000
     lm.train_loop(ds, opt, steps=steps, block_size=block_size, batch_size=batch_size)
     print(ds.decode(lm.generate(inp, block_size, max_tokens=1000)[0].tolist()))
     loss = lm.calc_loss(ds, block_size, batch_size, 'val')
