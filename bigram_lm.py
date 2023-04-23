@@ -67,6 +67,7 @@ class BigramLM(BaseLM):
         self.pos_lut = torch.nn.Embedding(block_size, embed_dim)
         self.blocks = torch.nn.ModuleList([TransformerBlock(attn_heads, embed_dim)]*layers)
         self.out_proj = torch.nn.Linear(embed_dim, vocab_size)
+        self.norm = torch.nn.LayerNorm(embed_dim)
 
     def forward(self, x, targets=None):
         token = self.token_lut(x)
@@ -74,7 +75,7 @@ class BigramLM(BaseLM):
         x = token + pos
         for b in self.blocks:
             x = b(x)
-        logits = self.out_proj(x)
+        logits = self.out_proj(self.norm(x))
         if targets is None:
             loss = None
         else:
@@ -113,6 +114,7 @@ class SelfAttention(torch.nn.Module):
         self.key_proj = torch.nn.Linear(input_dim, key_dim)
         self.value_proj = torch.nn.Linear(input_dim, value_dim)
         self.out_proj = torch.nn.Linear(value_dim, output_dim)
+        self.dropout = torch.nn.Dropout(0.2)
 
     def forward(self, x):
         q = self.query_proj(x)
@@ -123,6 +125,7 @@ class SelfAttention(torch.nn.Module):
             scores = torch.tril(scores)
             scores[scores==0.0] = -torch.inf
         wts = torch.softmax(scores, dim=2)
+        wts = self.dropout(wts)
         y = torch.matmul(wts, v)
         y = self.out_proj(y)
         return y
@@ -137,20 +140,23 @@ class MultiHeadAttention(torch.nn.Module):
         ])
         head_size += (input_dim - head_count*head_size)
         self.sa.append(SelfAttention(input_dim, key_dim, value_dim, output_dim=head_size))
+        self.dropout = torch.nn.Dropout(0.2)
 
     def forward(self, x):
         sa_outs = [sa(x) for sa in self.sa]
         out = torch.cat([x for x in sa_outs], dim=-1)
-        return out
+        return self.dropout(out)
 
 class FeedForward(torch.nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
         self.proj1 = torch.nn.Linear(embed_dim, 4*embed_dim)
         self.proj2 = torch.nn.Linear(4*embed_dim, embed_dim)
+        self.dropout = torch.nn.Dropout(0.2)
 
     def forward(self, x):
-        return self.proj2(F.relu(self.proj1(x)))
+        x = F.relu(self.proj1(x))
+        return self.dropout(self.proj2(x))
 
 class TransformerBlock(torch.nn.Module):
     def __init__(self, head_count, embed_dim, masked=True):
@@ -163,7 +169,8 @@ class TransformerBlock(torch.nn.Module):
         self.ln2 = torch.nn.LayerNorm(embed_dim)
 
     def forward(self, x):
-        return x + self.ffwd(self.ln2(self.attn(self.ln1(x))))
+        x = x + self.attn(self.ln1(x))
+        return x + self.ffwd(self.ln2(x))
 
 
 if __name__ == '__main__':
