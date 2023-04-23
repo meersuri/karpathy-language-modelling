@@ -28,30 +28,34 @@ class BaseLM(torch.nn.Module):
             out = torch.cat([out, samples], dim=1)
         return out
 
-    def train(self, opt, steps=1000, block_size=8, batch_size=32):
+    def train_loop(self, ds, opt, steps=1000, block_size=8, batch_size=32):
+        eval_period = steps//50
         for i in tqdm(range(steps)):
-            x, y = self.ds.get_batch(ds.train, block_size, batch_size)
+            if i % eval_period == 0:
+                train_loss = self.calc_loss(ds, block_size, batch_size, 'train')
+                val_loss = self.calc_loss(ds, block_size, batch_size, 'val')
+                print(f'Iter {i} train loss: {train_loss:.3f} val loss: {val_loss:.3f}')
+            x, y = ds.get_batch(ds.train, block_size, batch_size)
             x, y = x.to(self.device), y.to(self.device)
             opt.zero_grad()
             logits, loss = self.forward(x, y)
             loss.backward()
             opt.step()
 
+    @torch.no_grad()
     def calc_loss(self, ds, block_size, batch_size, split='train'):
-        with torch.no_grad():
-            if split == 'train':
-                data = ds.train
-            else:
-                data = ds.val
-            n = 100
-            loss = 0
-            for i in range(n):
-                x, y = ds.get_batch(data, block_size, batch_size)
-                x, y = x.to(self.device), y.to(self.device)
-                _, batch_loss = self(x, targets=y)
-                loss += batch_loss
-            loss /= n
-            return loss
+        assert split in ['train', 'val']
+        super().train(False)
+        n = 200
+        loss = 0
+        for i in range(n):
+            x, y = ds.get_batch(getattr(ds, split), block_size, batch_size)
+            x, y = x.to(self.device), y.to(self.device)
+            _, batch_loss = self(x, targets=y)
+            loss += batch_loss
+        loss /= n
+        super().train(False)
+        return loss
 
 
 class BigramLM(BaseLM):
@@ -176,15 +180,16 @@ if __name__ == '__main__':
     x, y = x.to(lm.device), y.to(lm.device)
     logits, _ = lm.forward(x, y)
     loss = lm.calc_loss(ds, block_size, batch_size, 'val')
-    print(f'init val loss: {loss}')
+    print(f'init val loss: {loss:.3f}')
     inp = torch.tensor([[0]]).to(lm.device)
     print(ds.decode(lm.generate(inp, block_size)[0].tolist()))
+
     opt = torch.optim.AdamW(lm.parameters(), lr=hparams.lr)
-    steps = 5000
-    lm.train(opt, steps=steps)
+    steps = 1000
+    lm.train_loop(ds, opt, steps=steps, block_size=block_size, batch_size=batch_size)
     print(ds.decode(lm.generate(inp, block_size, max_tokens=1000)[0].tolist()))
     loss = lm.calc_loss(ds, block_size, batch_size, 'val')
-    print(f'val loss: {loss}')
+    print(f'val loss: {loss:.3f}')
     time_str = datetime.strftime(datetime.now(), '%Y%d%m%H%M%S')
     torch.save( {
         'steps': steps,
