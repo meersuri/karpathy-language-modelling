@@ -12,12 +12,13 @@ class HyperParams:
         self.lr = lr
 
 class BaseLM(torch.nn.Module):
-    def __init__(self, dataset, hparams):
+    def __init__(self, hparams):
         super().__init__()
-        self.ds = dataset
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    @torch.no_grad()
     def generate(self, batch, block_size, max_tokens=100):
+        super().train(False)
         out = torch.clone(batch)
         for i in range(max_tokens):
             batch = batch[:, -block_size:]
@@ -26,6 +27,7 @@ class BaseLM(torch.nn.Module):
             samples = torch.multinomial(probs, num_samples=1)
             batch = torch.cat([batch, samples], dim=1)
             out = torch.cat([out, samples], dim=1)
+        super().train(True)
         return out
 
     def train_loop(self, ds, opt, steps=1000, block_size=8, batch_size=32):
@@ -59,12 +61,11 @@ class BaseLM(torch.nn.Module):
 
 
 class BigramLM(BaseLM):
-    def __init__(self, dataset, layers, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams):
-        super().__init__(dataset, hparams)
-        vocab_size = len(dataset.vocab)
+    def __init__(self, vocab_size, layers, block_size, embed_dim, attn_heads, hparams):
+        super().__init__(hparams)
         self.token_lut = torch.nn.Embedding(vocab_size, embed_dim)
         self.pos_lut = torch.nn.Embedding(block_size, embed_dim)
-        self.blocks = torch.nn.ModuleList([TransformerBlock(attn_heads, embed_dim, key_dim, value_dim)]*layers)
+        self.blocks = torch.nn.ModuleList([TransformerBlock(attn_heads, embed_dim)]*layers)
         self.out_proj = torch.nn.Linear(embed_dim, vocab_size)
 
     def forward(self, x, targets=None):
@@ -85,9 +86,8 @@ class BigramLM(BaseLM):
 
 
 class BigramLM2(BaseLM):
-    def __init__(self, dataset, hparams):
-        super().__init__(dataset, hparams)
-        vocab_size = len(dataset.vocab)
+    def __init__(self, vocab_size, hparams):
+        super().__init__(hparams)
         self.linear1 = torch.nn.Linear(1, vocab_size)
 
     def forward(self, x, targets=None):
@@ -153,8 +153,10 @@ class FeedForward(torch.nn.Module):
         return self.proj2(F.relu(self.proj1(x)))
 
 class TransformerBlock(torch.nn.Module):
-    def __init__(self, head_count, embed_dim, key_dim, value_dim, masked=True):
+    def __init__(self, head_count, embed_dim, masked=True):
         super().__init__()
+        key_dim = embed_dim // head_count
+        value_dim = key_dim
         self.attn = MultiHeadAttention(head_count, embed_dim, key_dim, value_dim, masked)
         self.ffwd = FeedForward(embed_dim)
         self.ln1 = torch.nn.LayerNorm(embed_dim)
@@ -168,13 +170,12 @@ if __name__ == '__main__':
     data_path = 'shakespeare.txt'
     ds = Dataset(data_path)
     hparams = HyperParams(lr=1e-3)
-    block_size = 8 # number of tokens in the sequence
-    embed_dim = 70 # token idx -> vector of embed_dim
-    batch_size = 32
-    attn_heads = 8
-    layers = 2
-    key_dim, value_dim = 8, 8
-    lm = BigramLM(ds, layers, block_size, embed_dim, attn_heads, key_dim, value_dim, hparams)
+    block_size = 256 # number of tokens in the sequence
+    embed_dim = 128 # token idx -> vector of embed_dim
+    batch_size = 64
+    attn_heads = 6
+    layers = 6
+    lm = BigramLM(len(ds.vocab), layers, block_size, embed_dim, attn_heads, hparams)
     lm.to(lm.device)
     x, y = ds.get_batch(ds.train, block_size, batch_size)
     x, y = x.to(lm.device), y.to(lm.device)
